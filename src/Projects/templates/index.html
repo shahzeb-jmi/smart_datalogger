@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ESP32 Dashboard — Dark Glass</title>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<style>
+  :root{
+    --bg1: linear-gradient(180deg,#07101a 0%, #0b1620 100%);
+    --card: rgba(255,255,255,0.04);
+    --glass-border: rgba(255,255,255,0.06);
+    --muted: #9fb4c9;
+    --accent: #58a6ff;
+    --glass-blur: 10px;
+    --pad: 12px;
+    --card-radius: 14px;
+  }
+
+  html,body{
+    height:100%; margin:0; font-family:Inter, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg1); color:#e6f0f6;
+  }
+
+  .wrap{ max-width:1200px; margin:18px auto; padding:16px; }
+
+  header{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    margin-bottom:14px;
+  }
+  header h1{ margin:0; font-size:20px; letter-spacing:0.2px; }
+  .controls { display:flex; gap:10px; align-items:center; }
+
+  a.btn {
+    background: linear-gradient(90deg,#1f7edb,#2bb9a3); color:#06121a; padding:8px 12px;border-radius:10px; text-decoration:none;
+    font-weight:700; box-shadow: 0 6px 18px rgba(10,30,40,0.45);
+  }
+
+  .card-grid{ display:grid; grid-template-columns: repeat(3, 1fr); gap:14px; }
+  @media (max-width:1000px){ .card-grid{ grid-template-columns: 1fr; } }
+
+  .card{
+    background: var(--card);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--card-radius);
+    padding: var(--pad);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    box-shadow: 0 8px 30px rgba(2,8,12,0.6);
+    min-height:120px;
+  }
+
+  .card h3{ margin:0 0 8px 0; color:var(--muted); font-size:13px; font-weight:600; }
+  .metric { font-size:28px; font-weight:800; color:var(--accent); margin-bottom:8px; }
+
+  .small-muted { color:var(--muted); font-size:13px; }
+
+  .charts { margin-top:16px; display:grid; grid-template-columns: 1fr; gap:14px; }
+
+  .row-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap:14px; }
+  @media (max-width:1200px){ .row-3{ grid-template-columns: 1fr; } }
+
+  .chart-card { padding:10px; border-radius:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.03); }
+
+  canvas { width:100% !important; height:260px !important; display:block; }
+
+  .combined-card { padding:14px; border-radius:12px; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); }
+
+  .stats-row { display:flex; gap:10px; margin-top:8px; flex-wrap:wrap; }
+  .stat-pill { background: rgba(255,255,255,0.02); padding:8px 10px; border-radius:10px; color:var(--muted); font-size:13px; }
+
+  table.stats-table{ width:100%; border-collapse:collapse; margin-top:12px; font-size:13px; color:#dfeffb; }
+  table.stats-table th, table.stats-table td { border:1px solid rgba(255,255,255,0.03); padding:8px; text-align:center; }
+  table.stats-table th { background: rgba(0,0,0,0.15); color:var(--muted); font-weight:700; }
+
+  footer { margin-top:18px; text-align:center; color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>ESP32 Dashboard For Datalogger</h1>
+      <div class="controls">
+        <a class="btn" href="/export">Download CSV</a>
+      </div>
+    </header>
+
+    <!-- Charts -->
+    <div class="charts">
+      <div class="row-3">
+        <div class="chart-card card">
+          <h3>Temperature</h3>
+          <canvas id="tempChart"></canvas>
+          <div class="stats-row" id="temp-stats-row">
+            <div class="stat-pill" id="temp-min">min: —</div>
+            <div class="stat-pill" id="temp-max">max: —</div>
+            <div class="stat-pill" id="temp-avg">avg: —</div>
+            <div class="stat-pill" id="temp-std">std: —</div>
+          </div>
+        </div>
+
+        <div class="chart-card card">
+          <h3>Humidity</h3>
+          <canvas id="humChart"></canvas>
+          <div class="stats-row" id="hum-stats-row">
+            <div class="stat-pill" id="hum-min">min: —</div>
+            <div class="stat-pill" id="hum-max">max: —</div>
+            <div class="stat-pill" id="hum-avg">avg: —</div>
+            <div class="stat-pill" id="hum-std">std: —</div>
+          </div>
+        </div>
+
+        <div class="chart-card card">
+          <h3>Light (%)</h3>
+          <canvas id="lightChart"></canvas>
+          <div class="stats-row" id="light-stats-row">
+            <div class="stat-pill" id="light-min">min: —</div>
+            <div class="stat-pill" id="light-max">max: —</div>
+            <div class="stat-pill" id="light-avg">avg: —</div>
+            <div class="stat-pill" id="light-std">std: —</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="combined-card card">
+        <h3>Acceleration X / Y / Z & Magnitude</h3>
+        <canvas id="combinedChart"></canvas>
+        <table class="stats-table">
+          <thead>
+            <tr><th>Series</th><th>Min</th><th>Max</th><th>Avg</th><th>Std</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ax</td><td id="ax_min">—</td><td id="ax_max">—</td><td id="ax_mean">—</td><td id="ax_std">—</td></tr>
+            <tr><td>ay</td><td id="ay_min">—</td><td id="ay_max">—</td><td id="ay_mean">—</td><td id="ay_std">—</td></tr>
+            <tr><td>az</td><td id="az_min">—</td><td id="az_max">—</td><td id="az_mean">—</td><td id="az_std">—</td></tr>
+            <tr><td>magnitude</td><td id="mag_min">—</td><td id="mag_max">—</td><td id="mag_mean">—</td><td id="mag_std">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer></footer>
+  </div>
+
+<script>
+/* utilities */
+function safeNum(v){ const n = Number(v); return isFinite(n) ? n : NaN; }
+function statsOf(arr){
+  const clean = (arr||[]).map(v=>safeNum(v)).filter(n=>!isNaN(n));
+  if(clean.length===0) return null;
+  let sum=0, min=clean[0], max=clean[0];
+  for(let x of clean){ sum += x; if(x<min) min=x; if(x>max) max=x; }
+  const mean = sum/clean.length;
+  let s=0;
+  for(let x of clean){ s += (x-mean)*(x-mean); }
+  const std = Math.sqrt(s/clean.length);
+  return { min, max, mean, std };
+}
+
+/* chart builders */
+function makeSingleOverlayChart(canvasId, color){
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        { label: 'value', data: [], borderColor: color, borderWidth: 2, fill: false, pointRadius:0, tension:0.25 },
+        { label: 'mean', data: [], borderColor: color, borderWidth:1.2, borderDash: [6,4], pointRadius:0, fill:false },
+        { label: 'min', data: [], borderColor: 'rgba(180,180,180,0.4)', borderDash:[4,4], pointRadius:0, fill:false },
+        { label: 'max', data: [], borderColor: 'rgba(180,180,180,0.4)', borderDash:[4,4], pointRadius:0, fill:false },
+        { label:'std_up', data: [], backgroundColor: color.replace('1)','0.09)').replace('rgb','rgba'), fill: '-1', pointRadius:0 },
+        { label:'std_low', data: [], pointRadius:0, borderColor: 'rgba(0,0,0,0)', backgroundColor: 'rgba(0,0,0,0)' }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display:false }, tooltip: { mode:'index', intersect:false } },
+      scales: { x:{ ticks:{ color:'#9fb4c9' } }, y:{ ticks:{ color:'#9fb4c9' } } },
+      elements: { line: { tension: 0.3 } }
+    }
+  });
+}
+
+function makeCombinedChart(){
+  const ctx = document.getElementById('combinedChart').getContext('2d');
+  return new Chart(ctx, {
+    type:'line',
+    data:{ labels: [], datasets:[
+      { label:'ax', data:[], borderColor:'rgba(255,99,132,1)', pointRadius:0, borderWidth:2, tension:0.2 },
+      { label:'ay', data:[], borderColor:'rgba(75,192,192,1)', pointRadius:0, borderWidth:2, tension:0.2 },
+      { label:'az', data:[],borderColor: 'rgba(54,162,235,1)', pointRadius:0, borderWidth:2, tension:0.2 },
+      { label:'magnitude', data:[], borderColor:'rgba(255,255,255,0.9)', pointRadius:0, borderWidth:3, tension:0.25,borderDash: [6, 8],shadowColor: 'rgba(255,255,255,0.8)',shadowBlur: 12 }
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'top' }, tooltip:{ mode:'index', intersect:false } }, scales:{ x:{ ticks:{ color:'#9fb4c9' } }, y:{ ticks:{ color:'#9fb4c9' } } } }
+  });
+}
+
+/* instances */
+let chartTemp=null, chartHum=null, chartLight=null, chartCombined=null;
+
+/* refresh */
+async function refresh(){
+  try{
+    const res = await fetch('/api/latest');
+    if(!res.ok){ console.error('fetch /api/latest failed', res.status); return; }
+    const raw = await res.json();
+    if(!Array.isArray(raw) || raw.length===0){ console.log('no data'); return; }
+
+    const rows = [...raw].reverse(); // chronological
+    const labels = rows.map(r => {
+      if(r.ts_ms) return new Date(Number(r.ts_ms)).toLocaleTimeString();
+      if(r.timestamp) return new Date(r.timestamp).toLocaleTimeString();
+      return '';
+    });
+
+    const arrTemp = rows.map(r => ('temp' in r) ? r.temp : (r.temperature_c ?? NaN));
+    const arrHum  = rows.map(r => ('humidity' in r) ? r.humidity : (r.humidity_pct ?? NaN));
+    const arrLight= rows.map(r => ('light' in r) ? r.light : (('ldr_raw' in r) ? (Number(r.ldr_raw)/4095*100) : NaN));
+    const arrAx   = rows.map(r => ('acc_x' in r) ? r.acc_x : (r.ax ?? NaN));
+    const arrAy   = rows.map(r => ('acc_y' in r) ? r.acc_y : (r.ay ?? NaN));
+    const arrAz   = rows.map(r => ('acc_z' in r) ? r.acc_z : (r.az ?? NaN));
+    const arrMag  = rows.map(r => ('magnitude' in r) ? r.magnitude : (r.mag ?? NaN));
+
+    // ---- ONLY LAST 15 ACCELEROMETER READINGS ----
+    
+
+    // If you want labels also:
+    
+    const last15_labels = labels.slice(-25);
+    const last15_ax = arrAx.slice(-25);
+    const last15_ay = arrAy.slice(-25);
+    const last15_az = arrAz.slice(-25);
+    const last15_mag = arrMag.slice(-25);
+
+
+    const sTemp = statsOf(arrTemp), sHum = statsOf(arrHum), sLight = statsOf(arrLight);
+    const sAx = statsOf(arrAx), sAy = statsOf(arrAy), sAz = statsOf(arrAz), sMag = statsOf(arrMag);
+
+    // create charts if needed
+    if(!chartTemp){
+      chartTemp  = makeSingleOverlayChart('tempChart','rgba(88,166,255,1)');
+      chartHum   = makeSingleOverlayChart('humChart','rgba(99,205,132,1)');
+      chartLight = makeSingleOverlayChart('lightChart','rgba(255,205,86,1)');
+      chartCombined = makeCombinedChart();
+    }
+
+    function updateSingle(cobj, arr, s){
+      cobj.data.labels = labels;
+      cobj.data.datasets[0].data = arr.map(v => isNaN(Number(v))?null:Number(v));
+      if(s){
+        cobj.data.datasets[1].data = new Array(arr.length).fill(s.mean);
+        cobj.data.datasets[2].data = new Array(arr.length).fill(s.min);
+        cobj.data.datasets[3].data = new Array(arr.length).fill(s.max);
+        cobj.data.datasets[4].data = new Array(arr.length).fill(s.mean + s.std);
+        cobj.data.datasets[5].data = new Array(arr.length).fill(s.mean - s.std);
+      } else {
+        cobj.data.datasets[1].data = [];
+        cobj.data.datasets[2].data = [];
+        cobj.data.datasets[3].data = [];
+        cobj.data.datasets[4].data = [];
+        cobj.data.datasets[5].data = [];
+      }
+      cobj.update();
+    }
+
+    if(sTemp) updateSingle(chartTemp, arrTemp, sTemp);
+    if(sHum)  updateSingle(chartHum, arrHum, sHum);
+    if(sLight) updateSingle(chartLight, arrLight, sLight);
+    
+    
+    
+    chartCombined.data.labels = last15_labels;
+    chartCombined.data.datasets[0].data = last15_ax;
+    chartCombined.data.datasets[1].data = last15_ay;
+    chartCombined.data.datasets[2].data = last15_az;
+    chartCombined.data.datasets[3].data = last15_mag;
+    
+
+
+
+    
+
+    chartCombined.update();
+
+    // fill combined stats table
+    function setText(id, v){ document.getElementById(id).innerText = (v===null||v===undefined) ? '—' : (typeof v==='number' ? v.toFixed(3) : v); }
+    if(sAx){ setText('ax_min', sAx.min); setText('ax_max', sAx.max); setText('ax_mean', sAx.mean); setText('ax_std', sAx.std); }
+    if(sAy){ setText('ay_min', sAy.min); setText('ay_max', sAy.max); setText('ay_mean', sAy.mean); setText('ay_std', sAy.std); }
+    if(sAz){ setText('az_min', sAz.min); setText('az_max', sAz.max); setText('az_mean', sAz.mean); setText('az_std', sAz.std); }
+    if(sMag){ setText('mag_min', sMag.min); setText('mag_max', sMag.max); setText('mag_mean', sMag.mean); setText('mag_std', sMag.std); }
+
+    // small stat pills
+    if(sTemp){ document.getElementById('temp-min').innerText = 'min: '+sTemp.min.toFixed(2); document.getElementById('temp-max').innerText = 'max: '+sTemp.max.toFixed(2); document.getElementById('temp-avg').innerText = 'avg: '+sTemp.mean.toFixed(2); document.getElementById('temp-std').innerText = 'std: '+sTemp.std.toFixed(2); }
+    if(sHum){ document.getElementById('hum-min').innerText = 'min: '+sHum.min.toFixed(2); document.getElementById('hum-max').innerText = 'max: '+sHum.max.toFixed(2); document.getElementById('hum-avg').innerText = 'avg: '+sHum.mean.toFixed(2); document.getElementById('hum-std').innerText = 'std: '+sHum.std.toFixed(2); }
+    if(sLight){ document.getElementById('light-min').innerText = 'min: '+sLight.min.toFixed(1); document.getElementById('light-max').innerText = 'max: '+sLight.max.toFixed(1); document.getElementById('light-avg').innerText = 'avg: '+sLight.mean.toFixed(1); document.getElementById('light-std').innerText = 'std: '+sLight.std.toFixed(1); }
+
+  }catch(err){
+    console.error('refresh error', err);
+  }
+}
+
+/* initial + interval */
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
